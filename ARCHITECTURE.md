@@ -129,7 +129,7 @@ output/
 | `main.py` | Orchestrates the run: discovery → users → per-channel parallel sync; handles `--dry-run`, CLI flag overrides, summary. | `ThreadPoolExecutor(MAX_WORKERS)`; per-channel errors are isolated (logged, others continue). |
 | `config.py` | Immutable `Config` dataclass; merges env vars > YAML > defaults; validates. | Date format + output-mode + postgres-connection validation at construction. |
 | `client.py` | Wraps `slack_sdk.WebClient`. Retries 429 (Retry-After + jitter) and Slack transient errors up to `max_retries`. | Acquires a `RateLimiter` token before each call. Thread-safe (stateless per call). |
-| `ratelimit.py` | Shared token-bucket so aggregate API rate stays within Slack tiers regardless of worker count. | `acquire()` releases the lock while sleeping (no global stall). |
+| `ratelimit.py` | `RateLimiter` token bucket + `PerMethodRateLimiter` (one bucket per Slack method) so each method runs at its own tier. | History and replies have separate Slack buckets → fetched in parallel, not shared. |
 | `channels.py` | `users.conversations` discovery (public + private), then allow/deny filtering by name or ID. | Cursor-paginated; unlimited channel count. |
 | `users.py` | `users.list` cached once per run; maps id → names/email. Optional pseudonymization (stable SHA-256 of email). | Cache loaded lazily; pseudonymization is a clean hook. |
 | `state.py` | Per-channel watermark + in-flight descent checkpoint. Thread-safe; atomic writes (tmp+rename). | `plan_run` / `checkpoint` / `complete`; migrates old flat format. |
@@ -205,8 +205,8 @@ boundaries. Deduplicate downstream on `(channel_id, ts)` if exactness is require
 
 ### Scalability
 - **Memory-bounded** by streaming: peak ≈ one page per worker, independent of channel size.
-- **Parallel** across channels and file downloads.
-- **Throughput ceiling** = Slack API rate (shared token bucket), so channel parallelism mainly helps with many channels; file download is the big parallel win.
+- **Parallel** across channels and file downloads; per-method rate limiters run history + replies buckets concurrently.
+- **Throughput ceiling** = Slack's per-method rate limit. The two main levers are `PAGE_SIZE` (up to 1000 → ~5× fewer requests) and the per-method limiter; channel parallelism overlaps different work types but cannot exceed the per-method history rate for one token.
 
 ### Security
 - Token read from env / secret manager; never hardcoded, never logged.
@@ -223,21 +223,25 @@ boundaries. Deduplicate downstream on `(channel_id, ts)` if exactness is require
 
 ## 7. Realistic Performance Estimates
 
-> Assumptions: `page_size=200`, `api_rate_per_sec=1.0` (default, shared), internal
-> app on normal Slack tiers. Message ≈ 0.5–1 KB normalized, 2–5 KB raw. Numbers are
-> order-of-magnitude — real throughput is dominated by Slack rate limits and network.
+> Assumptions: `page_size=1000` (default), `api_rate_per_sec=1.0` per method,
+> internal app on normal Slack tiers. Message ≈ 0.5–1 KB normalized, 2–5 KB raw.
+> Numbers are order-of-magnitude — real throughput is dominated by Slack rate
+> limits and network.
 
 ### History throughput (API-bound)
 
-| Total messages | History pages (÷200) | Time @ 1 req/s | Time @ 3 req/s |
+| Total messages | History pages (÷1000) | Time @ 1 req/s | Time @ 3 req/s |
 |---|---|---|---|
-| 10,000 | 50 | ~1 min | ~20 s |
-| 100,000 | 500 | ~8 min | ~3 min |
-| 1,000,000 | 5,000 | ~83 min | ~28 min |
-| 5,000,000 | 25,000 | ~7 hours | ~2.3 hours |
+| 10,000 | 10 | ~10 s | ~3 s |
+| 100,000 | 100 | ~1.7 min | ~33 s |
+| 1,000,000 | 1,000 | ~17 min | ~6 min |
+| 5,000,000 | 5,000 | ~83 min | ~28 min |
 
-> Threads add ~1 API call per thread that has replies. A thread-heavy workspace
-> can double the call count. Raise `api_rate_per_sec` only within your Slack tier.
+> `PAGE_SIZE=1000` makes ~5× fewer requests than 200 for the same data — the
+> single biggest throughput lever. Threads add ~1 `conversations.replies` call per
+> thread that has replies, but those draw from a **separate** Slack bucket (the
+> per-method limiter), so they don't slow history. Raise `api_rate_per_sec` only
+> within your Slack tier.
 
 ### Memory (bounded by streaming)
 
@@ -280,8 +284,8 @@ boundaries. Deduplicate downstream on `(channel_id, ts)` if exactness is require
 | `CHANNEL_ALLOWLIST` / `channel_allowlist` | — | only these channels (name or id) |
 | `CHANNEL_DENYLIST` / `channel_denylist` | — | exclude these channels |
 | `LOOKBACK_DAYS` / `lookback_days` | `90` | first-run history window |
-| `PAGE_SIZE` / `page_size` | `200` | conversations.history page size |
-| `THREAD_PAGE_SIZE` / `thread_page_size` | `200` | conversations.replies page size |
+| `PAGE_SIZE` / `page_size` | `1000` | conversations.history page size (max 1000) |
+| `THREAD_PAGE_SIZE` / `thread_page_size` | `1000` | conversations.replies page size |
 | `MAX_RETRIES` / `max_retries` | `5` | app-level retry attempts |
 | `PSEUDONYMIZE` / `pseudonymize` | `false` | hash user names |
 | `DOWNLOAD_FILES` / `download_files` | `false` | download attachments |
@@ -290,7 +294,7 @@ boundaries. Deduplicate downstream on `(channel_id, ts)` if exactness is require
 | `MAX_WORKERS` / `max_workers` | `4` | channels in parallel |
 | `FILE_WORKERS` / `file_workers` | `4` | files in parallel |
 | `MAX_FILE_SIZE_MB` / `max_file_size_mb` | `0` | skip files larger than (0 = no limit) |
-| `API_RATE_PER_SEC` / `api_rate_per_sec` | `1.0` | shared API request budget |
+| `API_RATE_PER_SEC` / `api_rate_per_sec` | `1.0` | per-method API request budget (each Slack method gets its own bucket) |
 | `SYNC_SINCE` / `since` | — | start date `YYYY-MM-DD` (CLI `--since`) |
 | `SYNC_UNTIL` / `until` | — | end date `YYYY-MM-DD` (CLI `--until`) |
 

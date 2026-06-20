@@ -35,3 +35,28 @@ class RateLimiter:
                     return
                 wait = (1 - self._tokens) / self._rate
             time.sleep(wait)
+
+
+class PerMethodRateLimiter:
+    """A separate token bucket per Slack API method.
+
+    Slack rate-limits each method independently (per token), so
+    conversations.history and conversations.replies draw from distinct
+    buckets. Giving each method its own limiter lets them run at full tier
+    in parallel instead of sharing one combined budget.
+    """
+
+    def __init__(self, rate_per_sec: float, burst: int) -> None:
+        self._rate = rate_per_sec
+        self._burst = burst
+        self._buckets: dict[str, RateLimiter] = {}
+        self._lock = threading.Lock()
+
+    def acquire(self, method: str) -> None:
+        with self._lock:
+            limiter = self._buckets.get(method)
+            if limiter is None:
+                limiter = RateLimiter(self._rate, self._burst)
+                self._buckets[method] = limiter
+        # Acquire outside the creation lock so methods don't serialize globally.
+        limiter.acquire()

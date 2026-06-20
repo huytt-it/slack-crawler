@@ -17,7 +17,7 @@ from slack_sync.config import Config, load_config
 from slack_sync.files import FileDownloader
 from slack_sync.history import iter_channel_history
 from slack_sync.probe import probe_channel, print_report
-from slack_sync.ratelimit import RateLimiter
+from slack_sync.ratelimit import PerMethodRateLimiter
 from slack_sync.state import WatermarkStore
 from slack_sync.storage import StorageBackend
 from slack_sync.storage.ndjson import NdjsonBackend
@@ -120,7 +120,7 @@ def run(config: Config, dry_run: bool = False) -> None:
     """Execute the full sync pipeline."""
     start = time.monotonic()
     now_ts = str(datetime.now(timezone.utc).timestamp())
-    rate_limiter = RateLimiter(config.api_rate_per_sec, burst=max(2, config.max_workers))
+    rate_limiter = PerMethodRateLimiter(config.api_rate_per_sec, burst=max(2, config.max_workers))
     client = SlackClient(config.slack_token, max_retries=config.max_retries, rate_limiter=rate_limiter)
     watermark_store = WatermarkStore(config.state_dir)
 

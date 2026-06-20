@@ -24,7 +24,7 @@ class TestConfigValidation:
         cfg = Config(slack_token="xoxp-test")
         assert cfg.output_mode == "ndjson"
         assert cfg.lookback_days == 90
-        assert cfg.page_size == 200
+        assert cfg.page_size == 1000
         assert cfg.since is None
         assert cfg.until is None
 

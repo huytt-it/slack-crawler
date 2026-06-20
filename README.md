@@ -52,8 +52,8 @@ cp config.example.yaml config.yaml
 | `CHANNEL_ALLOWLIST` | No | — | Comma-separated channel IDs or names |
 | `CHANNEL_DENYLIST` | No | — | Comma-separated channel IDs or names |
 | `LOOKBACK_DAYS` | No | `90` | First-run lookback window (days) |
-| `PAGE_SIZE` | No | `200` | Page size for conversations.history |
-| `THREAD_PAGE_SIZE` | No | `200` | Page size for conversations.replies |
+| `PAGE_SIZE` | No | `1000` | Page size for conversations.history (max 1000; bigger = fewer rate-limited requests) |
+| `THREAD_PAGE_SIZE` | No | `1000` | Page size for conversations.replies |
 | `MAX_RETRIES` | No | `5` | Max retries on transient errors / 429 |
 | `PSEUDONYMIZE` | No | `false` | Replace user names with hashed IDs |
 | `DOWNLOAD_FILES` | No | `false` | Download file attachments to `output/<channel>/files/` |
@@ -339,9 +339,12 @@ Start in: C:\path\to\SlackCrawler
 
 ### Rate limits & concurrency
 
-This is an internal app, so it uses normal Slack API rate limits (not the reduced limits for unlisted Marketplace apps). A shared token-bucket (`API_RATE_PER_SEC`) caps the aggregate request rate across all worker threads, and 429 responses are honored via the `Retry-After` header with jitter to avoid a thundering herd. Transient errors get exponential backoff.
+This is an internal app, so it uses normal Slack API rate limits (not the reduced limits for unlisted Marketplace apps). Slack rate-limits **each method independently** (per token), so the limiter keeps a **separate token bucket per method** (`API_RATE_PER_SEC` each) — `conversations.history` and `conversations.replies` run at full tier in parallel instead of sharing one budget. 429 responses are honored via the `Retry-After` header with jitter to avoid a thundering herd; transient errors get exponential backoff.
 
-> **Throughput note:** history fetching is bounded by Slack's API rate limit (shared across workers), so channel parallelism mainly helps when you have many channels. The biggest speedups from parallelism come from **file downloads** (separate host) and **thread fetches**.
+> **Throughput levers:**
+> 1. **`PAGE_SIZE` (default 1000)** — the biggest lever. Each request returns up to 1000 messages, so you make ~5× fewer rate-limited requests than at 200 for the same data.
+> 2. **Per-method limiter** — history and replies use separate Slack buckets, so thread-heavy workspaces fetch both concurrently.
+> Channel parallelism mainly overlaps different work types (history vs replies vs file downloads); the per-method history rate is still the ultimate ceiling for a single token.
 
 ---
 

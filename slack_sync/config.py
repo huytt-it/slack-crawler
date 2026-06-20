@@ -21,8 +21,8 @@ class Config:
     channel_allowlist: list[str] = field(default_factory=list)
     channel_denylist: list[str] = field(default_factory=list)
     lookback_days: int = 90
-    page_size: int = 200
-    thread_page_size: int = 200
+    page_size: int = 1000
+    thread_page_size: int = 1000
     max_retries: int = 5
     pseudonymize: bool = False
     download_files: bool = False
@@ -94,8 +94,8 @@ def load_config(config_path: Optional[str] = None) -> Config:
         channel_allowlist=_get_list("CHANNEL_ALLOWLIST"),
         channel_denylist=_get_list("CHANNEL_DENYLIST"),
         lookback_days=int(_get("LOOKBACK_DAYS", 90)),
-        page_size=int(_get("PAGE_SIZE", 200)),
-        thread_page_size=int(_get("THREAD_PAGE_SIZE", 200)),
+        page_size=int(_get("PAGE_SIZE", 1000)),
+        thread_page_size=int(_get("THREAD_PAGE_SIZE", 1000)),
         max_retries=int(_get("MAX_RETRIES", 5)),
         pseudonymize=str(_get("PSEUDONYMIZE", "false")).lower() in ("true", "1", "yes"),
         download_files=str(_get("DOWNLOAD_FILES", yaml_key="download_files", default="false")).lower() in ("true", "1", "yes"),

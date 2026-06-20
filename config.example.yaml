@@ -24,9 +24,11 @@ channel_denylist: []
 # How far back to look on the first run (days)
 lookback_days: 90
 
-# Slack API page sizes
-page_size: 200
-thread_page_size: 200
+# Slack API page sizes (max 1000). Larger = fewer rate-limited requests for the
+# same data — the biggest lever for history throughput. Internal apps are exempt
+# from the 15-object cap, so 1000 is safe.
+page_size: 1000
+thread_page_size: 1000
 
 # Max retry attempts for transient API errors
 max_retries: 5

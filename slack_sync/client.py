@@ -10,7 +10,7 @@ from typing import Any, Optional
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-from slack_sync.ratelimit import RateLimiter
+from slack_sync.ratelimit import PerMethodRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class SlackClient:
     """Thin wrapper around slack_sdk.WebClient with automatic retry on 429 and transient errors.
 
     Safe to share across threads: slack_sdk.WebClient is stateless per call, and
-    the optional RateLimiter serializes the request budget.
+    the optional PerMethodRateLimiter throttles each method's own Slack bucket.
     """
 
     TRANSIENT_ERRORS = ("timeout", "fatal_error", "internal_error", "request_timeout")
@@ -28,7 +28,7 @@ class SlackClient:
         self,
         token: str,
         max_retries: int = 5,
-        rate_limiter: Optional[RateLimiter] = None,
+        rate_limiter: Optional[PerMethodRateLimiter] = None,
     ) -> None:
         self._client = WebClient(token=token)
         self._max_retries = max_retries
@@ -38,7 +38,7 @@ class SlackClient:
         """Execute a Slack API method with retry on 429 and transient errors."""
         for attempt in range(1, self._max_retries + 1):
             if self._rate_limiter is not None:
-                self._rate_limiter.acquire()
+                self._rate_limiter.acquire(method)
             try:
                 response = getattr(self._client, method)(**kwargs)
                 return response.data
