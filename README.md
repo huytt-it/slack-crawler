@@ -59,6 +59,12 @@ cp config.example.yaml config.yaml
 | `DOWNLOAD_FILES` | No | `false` | Download file attachments to `output/<channel>/files/` |
 | `SYNC_SINCE` | No | — | Start date `YYYY-MM-DD` (overrides watermark & lookback) |
 | `SYNC_UNTIL` | No | — | End date `YYYY-MM-DD` (only fetch messages before this) |
+| `USE_WATERMARK` | No | `true` | `false` re-fetches from lookback each run |
+| `STORE_RAW` | No | `true` | Write original payloads to a separate `raw.ndjson` |
+| `MAX_WORKERS` | No | `4` | Channels synced in parallel |
+| `FILE_WORKERS` | No | `4` | Files downloaded in parallel |
+| `MAX_FILE_SIZE_MB` | No | `0` | Skip attachments larger than this (0 = no limit) |
+| `API_RATE_PER_SEC` | No | `1.0` | Shared cap on Slack API requests/sec across workers |
 
 ---
 
@@ -93,7 +99,34 @@ python main.py --since 2025-03-01
 
 # Download file attachments
 python main.py --download-files
+
+# Estimate run size first — probes one page per channel, downloads nothing
+python main.py --dry-run --download-files
 ```
+
+### Dry run (estimate before a big pull)
+
+`--dry-run` samples one page per channel and prints an estimate without downloading anything:
+
+```
+============================================================
+  DRY RUN - estimate only, nothing was downloaded
+============================================================
+  engineering              ~  1,240,000 msgs
+  general                  ~    430,000 msgs
+  random                   ~        820 msgs  (complete in 1 page)
+------------------------------------------------------------
+  Channels:            3
+  Est. messages:       ~1,670,820
+  Est. history pages:  ~8,355
+  Est. history time:   ~139.2 min (at 1.0/s)
+  Est. files:          ~12,400
+  Est. file size:      ~84.2 GB
+  Disk free:           512.0 GB  [OK]
+============================================================
+```
+
+> Slack provides no exact message count, so estimates are order-of-magnitude (extrapolated from the newest page's time-density). File sizes are exact for sampled files. Use it to size disk and tune workers before committing to a first run.
 
 > **Note:** `--since` overrides both the watermark and `LOOKBACK_DAYS`. Without `--since`, the tool runs incrementally from the last watermark as usual.
 
@@ -298,15 +331,17 @@ Start in: C:\path\to\SlackCrawler
 
 1. **Channel discovery** — calls `users.conversations` to list channels the token owner is a member of. Filters by allowlist/denylist.
 2. **User resolution** — calls `users.list` once per run, caches the mapping.
-3. **Incremental sync** — for each channel, reads the stored watermark (the `ts` of the last synced message). Fetches only messages with `ts > watermark` using the `oldest` parameter.
-4. **Thread fetch** — for any message with `reply_count > 0`, fetches the full thread via `conversations.replies`.
-5. **File download** (optional) — if `--download-files` is set, downloads attachments to `output/<channel>/files/`.
-6. **Persist** — writes normalized messages to NDJSON files or Postgres.
-7. **Advance watermark** — only after a channel completes successfully, so a crash mid-run won't skip messages on the next run.
+3. **Parallel channel sync** — channels are synced concurrently (`MAX_WORKERS`). Each channel **streams** page-by-page so peak memory stays bounded to a single page regardless of channel size.
+4. **Incremental sync** — reads the stored watermark and fetches only messages newer than it via the `oldest` parameter.
+5. **Thread fetch** — for any message with `reply_count > 0`, fetches the full thread via `conversations.replies`.
+6. **File download** (optional) — attachments in a page download in parallel (`FILE_WORKERS`) over a reused HTTP connection.
+7. **Persist + checkpoint** — each page is written, then progress is checkpointed. A crash resumes from the last completed page (re-fetching only the boundary). The watermark advances only when the whole channel descent completes.
 
-### Rate limits
+### Rate limits & concurrency
 
-This is an internal app, so it uses normal Slack API rate limits (not the reduced limits for unlisted Marketplace apps). The tool handles HTTP 429 responses by reading the `Retry-After` header and sleeping accordingly. Transient errors get exponential backoff.
+This is an internal app, so it uses normal Slack API rate limits (not the reduced limits for unlisted Marketplace apps). A shared token-bucket (`API_RATE_PER_SEC`) caps the aggregate request rate across all worker threads, and 429 responses are honored via the `Retry-After` header with jitter to avoid a thundering herd. Transient errors get exponential backoff.
+
+> **Throughput note:** history fetching is bounded by Slack's API rate limit (shared across workers), so channel parallelism mainly helps when you have many channels. The biggest speedups from parallelism come from **file downloads** (separate host) and **thread fetches**.
 
 ---
 
@@ -315,7 +350,8 @@ This is an internal app, so it uses normal Slack API rate limits (not the reduce
 ```
 output/
 ├── general/
-│   ├── messages.ndjson
+│   ├── messages.ndjson         # normalized fields (lean, for analytics/RAG)
+│   ├── raw.ndjson              # original Slack payloads (only if store_raw)
 │   ├── _files_index.json       # file metadata: sender, datetime, thread (only with --download-files)
 │   └── files/                  # downloaded attachments (only with --download-files)
 │       ├── F07ABC_report.pdf
@@ -326,7 +362,7 @@ output/
 └── _users.json
 ```
 
-Each channel gets its own directory. Messages are in `messages.ndjson`, file attachments (if enabled) are in `files/`.
+Each channel gets its own directory. `messages.ndjson` holds the normalized fields; the bulky original payload is split into `raw.ndjson` (disable with `STORE_RAW=false`) so the message file stays compact. Attachments (if enabled) are in `files/`.
 
 ### Files Index
 
@@ -364,12 +400,29 @@ Each line in `messages.ndjson` is a JSON object:
 | `subtype` | string | Message subtype (null for normal messages) |
 | `reactions` | json | Reaction data (null if none) |
 | `reply_count` | int | Number of thread replies |
-| `raw` | json | Original Slack API response |
 | `downloaded_files` | json / absent | List of downloaded files (only present when `--download-files` is used and message has attachments) |
+
+The original Slack payload (`raw`) is **not** in `messages.ndjson` — it lives in `raw.ndjson`, keyed by `channel_id` + `ts`, so you can join back to it when needed.
 
 ---
 
-## 7. Assumptions & Design Decisions
+## 7. Production Notes & Scaling
+
+Designed to handle millions of messages and large files on the file (NDJSON) backend:
+
+- **Bounded memory** — channels stream page-by-page; peak RAM stays at roughly one page (`PAGE_SIZE`) per worker, not the whole channel.
+- **Parallelism** — `MAX_WORKERS` channels and `FILE_WORKERS` file downloads run concurrently; a shared rate limiter keeps API usage within Slack's tier.
+- **Resumable** — per-page checkpointing means a crash on a multi-hour first run resumes from the last completed page, not from zero.
+- **Disk safety** — `--dry-run` estimates total file bytes vs free disk; `MAX_FILE_SIZE_MB` skips oversized attachments.
+- **Lean output** — `raw` is split into `raw.ndjson` (or disabled with `STORE_RAW=false`) so the analytics/RAG file stays compact.
+
+### Known limitation: new replies to old threads
+
+Incremental runs fetch messages with `ts > watermark`. A reply added today to a thread whose parent is older than the watermark won't be re-detected (the parent isn't returned by `conversations.history`). For a full refresh of thread activity, run with `--no-watermark` (or `--since`) periodically.
+
+---
+
+## 8. Assumptions & Design Decisions
 
 - **Date range export:** use `--since` and `--until` (or `SYNC_SINCE` / `SYNC_UNTIL` env vars) to export a specific date range. `--since` overrides the watermark and lookback, so the tool always starts from the date you specify.
 - **First-run lookback** defaults to 90 days. Set `LOOKBACK_DAYS` to adjust.
@@ -377,4 +430,5 @@ Each line in `messages.ndjson` is a JSON object:
 - **Bot messages** are included (they have `user_id` set to the bot's ID or `bot_id`).
 - **Pseudonymization** is opt-in. When enabled, user display names and real names are replaced with a stable SHA-256 hash prefix of their email (or user ID if no email).
 - **Watermarks use Slack's `ts`** (a string like `"1234567890.123456"`), which is both a timestamp and a unique message ID.
+- **At-least-once writes:** because NDJSON appends (no upsert), resuming after a crash may re-append the single boundary page — expect rare duplicate lines at checkpoint boundaries; deduplicate downstream on `(channel_id, ts)` if needed.
 - The NDJSON backend appends to files, making it safe for incremental runs. To rebuild from scratch, delete the `output/` and `.state/` directories.

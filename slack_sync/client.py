@@ -3,27 +3,42 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
-from typing import Any
+from typing import Any, Optional
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+
+from slack_sync.ratelimit import RateLimiter
 
 logger = logging.getLogger(__name__)
 
 
 class SlackClient:
-    """Thin wrapper around slack_sdk.WebClient with automatic retry on 429 and transient errors."""
+    """Thin wrapper around slack_sdk.WebClient with automatic retry on 429 and transient errors.
+
+    Safe to share across threads: slack_sdk.WebClient is stateless per call, and
+    the optional RateLimiter serializes the request budget.
+    """
 
     TRANSIENT_ERRORS = ("timeout", "fatal_error", "internal_error", "request_timeout")
 
-    def __init__(self, token: str, max_retries: int = 5) -> None:
+    def __init__(
+        self,
+        token: str,
+        max_retries: int = 5,
+        rate_limiter: Optional[RateLimiter] = None,
+    ) -> None:
         self._client = WebClient(token=token)
         self._max_retries = max_retries
+        self._rate_limiter = rate_limiter
 
     def api_call(self, method: str, **kwargs: Any) -> dict:
         """Execute a Slack API method with retry on 429 and transient errors."""
         for attempt in range(1, self._max_retries + 1):
+            if self._rate_limiter is not None:
+                self._rate_limiter.acquire()
             try:
                 response = getattr(self._client, method)(**kwargs)
                 return response.data
@@ -33,17 +48,19 @@ class SlackClient:
 
                 if status == 429:
                     retry_after = int(e.response.headers.get("Retry-After", 30))
+                    # Jitter avoids a thundering herd when many workers back off together.
+                    jitter = random.uniform(0, min(5, retry_after))
                     logger.warning(
-                        "Rate limited on %s (attempt %d/%d). Retrying in %ds.",
-                        method, attempt, self._max_retries, retry_after,
+                        "Rate limited on %s (attempt %d/%d). Retrying in %.1fs.",
+                        method, attempt, self._max_retries, retry_after + jitter,
                     )
-                    time.sleep(retry_after)
+                    time.sleep(retry_after + jitter)
                     continue
 
                 if error in self.TRANSIENT_ERRORS:
-                    backoff = min(2 ** attempt, 60)
+                    backoff = min(2 ** attempt, 60) + random.uniform(0, 1)
                     logger.warning(
-                        "Transient error '%s' on %s (attempt %d/%d). Retrying in %ds.",
+                        "Transient error '%s' on %s (attempt %d/%d). Retrying in %.1fs.",
                         error, method, attempt, self._max_retries, backoff,
                     )
                     time.sleep(backoff)

@@ -41,4 +41,52 @@ class TestWatermarkStore:
         assert not tmp_file.exists()
 
         data = json.loads(wm_file.read_text())
-        assert data["C001"] == "100.0"
+        assert data["C001"]["watermark"] == "100.0"
+
+    def test_migrates_old_flat_format(self, tmp_path):
+        wm_file = tmp_path / "watermarks.json"
+        wm_file.write_text(json.dumps({"C001": "123.456"}))
+        store = WatermarkStore(str(tmp_path))
+        assert store.get("C001") == "123.456"
+
+
+class TestRunLifecycle:
+    def test_fresh_plan_creates_progress(self, tmp_path):
+        store = WatermarkStore(str(tmp_path))
+        plan = store.plan_run("C1", "100.0", None, use_watermark=True)
+        assert plan.oldest == "100.0"
+        assert plan.resuming is False
+
+    def test_resume_continues_from_low(self, tmp_path):
+        store = WatermarkStore(str(tmp_path))
+        store.plan_run("C1", "100.0", None, use_watermark=True)
+        store.checkpoint("C1", low="150.0", high="200.0")
+
+        store2 = WatermarkStore(str(tmp_path))
+        plan = store2.plan_run("C1", "100.0", None, use_watermark=True)
+        assert plan.resuming is True
+        assert plan.latest == "150.0"
+        assert plan.high_start == "200.0"
+
+    def test_complete_advances_watermark_and_clears_progress(self, tmp_path):
+        store = WatermarkStore(str(tmp_path))
+        store.plan_run("C1", "100.0", None, use_watermark=True)
+        store.checkpoint("C1", low="150.0", high="200.0")
+        store.complete("C1", "200.0", use_watermark=True, wrote_any=True, now_ts="999.0")
+
+        assert store.get("C1") == "200.0"
+        store2 = WatermarkStore(str(tmp_path))
+        plan = store2.plan_run("C1", "200.0", None, use_watermark=True)
+        assert plan.resuming is False
+
+    def test_complete_empty_first_run_anchors_now(self, tmp_path):
+        store = WatermarkStore(str(tmp_path))
+        store.plan_run("C1", "100.0", None, use_watermark=True)
+        store.complete("C1", "0", use_watermark=True, wrote_any=False, now_ts="999.0")
+        assert store.get("C1") == "999.0"
+
+    def test_no_watermark_does_not_advance(self, tmp_path):
+        store = WatermarkStore(str(tmp_path))
+        store.plan_run("C1", "100.0", None, use_watermark=False)
+        store.complete("C1", "200.0", use_watermark=False, wrote_any=True, now_ts="999.0")
+        assert store.get("C1") is None

@@ -40,6 +40,23 @@ download_files: false
 # Incremental sync: true = only fetch new messages, false = re-fetch from lookback_days each run
 use_watermark: true
 
+# --- Performance / production tuning ---
+
+# Store original Slack payloads in a separate raw.ndjson (keeps messages.ndjson lean)
+store_raw: true
+
+# Number of channels synced in parallel
+max_workers: 4
+
+# Number of files downloaded in parallel (per channel page)
+file_workers: 4
+
+# Skip file attachments larger than this many MB (0 = no limit)
+max_file_size_mb: 0
+
+# Shared cap on Slack API requests per second across all workers
+api_rate_per_sec: 1.0
+
 # Date range filter (YYYY-MM-DD). Overrides watermark/lookback when set.
 # Can also be passed via CLI: --since / --until
 # since: "2025-01-01"

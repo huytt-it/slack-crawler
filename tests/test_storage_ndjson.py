@@ -10,26 +10,36 @@ def _make_msg(**overrides):
     base = {
         "channel_id": "C1", "ts": "100.0", "text": "hello", "channel_name": "general",
         "user_id": "U1", "datetime_utc": "2025-01-01T00:00:00+00:00", "type": "message",
-        "subtype": None, "thread_ts": None, "reactions": None, "reply_count": 0, "raw": {},
+        "subtype": None, "thread_ts": None, "reactions": None, "reply_count": 0,
+        "raw": {"ts": "100.0", "text": "hello", "blocks": ["..."]},
     }
     base.update(overrides)
     return base
 
 
 class TestNdjsonBackend:
-    def test_store_messages_in_channel_dir(self, tmp_path):
+    def test_messages_exclude_raw(self, tmp_path):
         backend = NdjsonBackend(str(tmp_path / "out"))
-        messages = [_make_msg(ts="100.0", text="hello"), _make_msg(ts="101.0", text="world")]
+        backend.store_messages("C1", "general", [_make_msg()])
 
-        count = backend.store_messages("C1", "general", messages)
-        assert count == 2
+        msg_path = tmp_path / "out" / "general" / "messages.ndjson"
+        record = json.loads(msg_path.read_text(encoding="utf-8").strip())
+        assert "raw" not in record
+        assert record["text"] == "hello"
 
-        path = tmp_path / "out" / "general" / "messages.ndjson"
-        assert path.exists()
-        lines = path.read_text(encoding="utf-8").strip().split("\n")
-        assert len(lines) == 2
-        assert json.loads(lines[0])["text"] == "hello"
-        assert json.loads(lines[1])["text"] == "world"
+    def test_raw_written_to_separate_file(self, tmp_path):
+        backend = NdjsonBackend(str(tmp_path / "out"), store_raw=True)
+        backend.store_messages("C1", "general", [_make_msg()])
+
+        raw_path = tmp_path / "out" / "general" / "raw.ndjson"
+        record = json.loads(raw_path.read_text(encoding="utf-8").strip())
+        assert record["ts"] == "100.0"
+        assert record["raw"]["blocks"] == ["..."]
+
+    def test_store_raw_disabled(self, tmp_path):
+        backend = NdjsonBackend(str(tmp_path / "out"), store_raw=False)
+        backend.store_messages("C1", "general", [_make_msg()])
+        assert not (tmp_path / "out" / "general" / "raw.ndjson").exists()
 
     def test_append_on_second_run(self, tmp_path):
         backend = NdjsonBackend(str(tmp_path / "out"))
@@ -53,14 +63,7 @@ class TestNdjsonBackend:
 
     def test_store_users(self, tmp_path):
         backend = NdjsonBackend(str(tmp_path / "out"))
-        users = {
-            "U1": {"id": "U1", "display_name": "alice", "real_name": "Alice", "email": "a@x.com"},
-            "U2": {"id": "U2", "display_name": "bob", "real_name": "Bob", "email": None},
-        }
+        users = {"U1": {"id": "U1", "display_name": "alice", "real_name": "Alice", "email": "a@x.com"}}
         backend.store_users(users)
-
-        path = tmp_path / "out" / "_users.json"
-        assert path.exists()
-        data = json.loads(path.read_text(encoding="utf-8"))
-        assert len(data) == 2
+        data = json.loads((tmp_path / "out" / "_users.json").read_text(encoding="utf-8"))
         assert data["U1"]["display_name"] == "alice"

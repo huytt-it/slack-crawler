@@ -29,6 +29,11 @@ class Config:
     use_watermark: bool = True
     since: Optional[str] = None  # ISO date, e.g. "2025-01-01"
     until: Optional[str] = None  # ISO date, e.g. "2025-06-30"
+    store_raw: bool = True
+    max_workers: int = 4
+    file_workers: int = 4
+    max_file_size_mb: int = 0  # 0 = no limit
+    api_rate_per_sec: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.slack_token:
@@ -97,4 +102,9 @@ def load_config(config_path: Optional[str] = None) -> Config:
         use_watermark=str(_get("USE_WATERMARK", yaml_key="use_watermark", default="true")).lower() not in ("false", "0", "no"),
         since=_get("SYNC_SINCE", yaml_key="since"),
         until=_get("SYNC_UNTIL", yaml_key="until"),
+        store_raw=str(_get("STORE_RAW", yaml_key="store_raw", default="true")).lower() not in ("false", "0", "no"),
+        max_workers=int(_get("MAX_WORKERS", yaml_key="max_workers", default=4)),
+        file_workers=int(_get("FILE_WORKERS", yaml_key="file_workers", default=4)),
+        max_file_size_mb=int(_get("MAX_FILE_SIZE_MB", yaml_key="max_file_size_mb", default=0)),
+        api_rate_per_sec=float(_get("API_RATE_PER_SEC", yaml_key="api_rate_per_sec", default=1.0)),
     )
