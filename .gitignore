@@ -2,7 +2,6 @@
 .env
 *.env
 run.bat
-run.example.bat
 
 # Sync output
 output/
