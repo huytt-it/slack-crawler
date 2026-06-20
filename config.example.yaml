@@ -1,0 +1,40 @@
+# Slack Sync configuration
+# Copy this to config.yaml and fill in your values.
+# Environment variables (UPPER_CASE) override these settings.
+
+# Required — or set SLACK_TOKEN env var
+slack_token: "xoxp-your-token-here"
+
+# "ndjson" (default) or "postgres"
+output_mode: ndjson
+
+# Required if output_mode is postgres — or set DB_CONNECTION_STRING env var
+# db_connection_string: "postgresql://user:pass@localhost:5432/slack_data"
+
+# Directory for NDJSON output files
+output_dir: output
+
+# Directory for watermark state
+state_dir: .state
+
+# Channel filter — IDs or names. Empty = all channels.
+channel_allowlist: []
+channel_denylist: []
+
+# How far back to look on the first run (days)
+lookback_days: 90
+
+# Slack API page sizes
+page_size: 200
+thread_page_size: 200
+
+# Max retry attempts for transient API errors
+max_retries: 5
+
+# Replace user names with stable hashed IDs
+pseudonymize: false
+
+# Date range filter (YYYY-MM-DD). Overrides watermark/lookback when set.
+# Can also be passed via CLI: --since / --until
+# since: "2025-01-01"
+# until: "2025-06-30"
