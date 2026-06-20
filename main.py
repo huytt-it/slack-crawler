@@ -50,13 +50,16 @@ def sync_channel(
     if config.since:
         oldest = _date_to_ts(config.since)
         logger.info("Channel %s: using --since %s as start date.", channel_name, config.since)
-    elif (existing_wm := watermark_store.get(channel_id)):
+    elif config.use_watermark and (existing_wm := watermark_store.get(channel_id)):
         oldest = existing_wm
         logger.info("Channel %s: resuming from watermark %s.", channel_name, oldest)
     else:
         lookback = datetime.now(timezone.utc) - timedelta(days=config.lookback_days)
         oldest = str(lookback.timestamp())
-        logger.info("Channel %s: first run, looking back %d days.", channel_name, config.lookback_days)
+        if not config.use_watermark:
+            logger.info("Channel %s: watermark disabled, looking back %d days.", channel_name, config.lookback_days)
+        else:
+            logger.info("Channel %s: first run, looking back %d days.", channel_name, config.lookback_days)
 
     latest = _date_to_ts(config.until) if config.until else None
     if latest:
@@ -100,8 +103,9 @@ def sync_channel(
 
     stored = storage.store_messages(channel_id, channel_name, deduplicated)
 
-    max_ts = max(m["ts"] for m in deduplicated)
-    watermark_store.set(channel_id, max_ts)
+    if config.use_watermark:
+        max_ts = max(m["ts"] for m in deduplicated)
+        watermark_store.set(channel_id, max_ts)
 
     return stored
 
@@ -157,6 +161,7 @@ def main() -> None:
     parser.add_argument("--since", help="Start date (YYYY-MM-DD). Overrides watermark and lookback_days.")
     parser.add_argument("--until", help="End date (YYYY-MM-DD). Only fetch messages before this date.")
     parser.add_argument("--download-files", action="store_true", help="Download file attachments.")
+    parser.add_argument("--no-watermark", action="store_true", help="Ignore stored watermarks, always fetch from lookback_days or --since.")
     args = parser.parse_args()
 
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -172,14 +177,16 @@ def main() -> None:
         logger.error("Configuration error: %s", e)
         sys.exit(1)
 
-    if args.since or args.until or args.download_files:
-        overrides: dict = {}
-        if args.since:
-            overrides["since"] = args.since
-        if args.until:
-            overrides["until"] = args.until
-        if args.download_files:
-            overrides["download_files"] = True
+    overrides: dict = {}
+    if args.since:
+        overrides["since"] = args.since
+    if args.until:
+        overrides["until"] = args.until
+    if args.download_files:
+        overrides["download_files"] = True
+    if args.no_watermark:
+        overrides["use_watermark"] = False
+    if overrides:
         from dataclasses import replace
         config = replace(config, **overrides)
 

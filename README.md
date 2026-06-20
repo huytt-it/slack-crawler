@@ -20,6 +20,7 @@ A CLI tool that pulls message history from Slack channels incrementally and pers
 | `groups:read` | List private channels |
 | `users:read` | Resolve user IDs to names |
 | `users:read.email` | Resolve user emails (optional, for pseudonymization) |
+| `files:read` | Download file attachments (required if using `--download-files`) |
 
 > **Optional DM scopes:** Add `im:history` and `mpim:history` if you need to pull direct messages. You will also need to add `im` and `mpim` to the `types` parameter in `channels.py`.
 

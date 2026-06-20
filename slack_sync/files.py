@@ -33,7 +33,10 @@ class FileDownloader:
         raw = msg.get("raw", {})
         files = raw.get("files", [])
         if not files:
+            logger.debug("Message %s has no files in raw payload.", msg.get("ts", "?"))
             return []
+
+        logger.info("Message %s has %d file(s) to download.", msg.get("ts", "?"), len(files))
 
         safe_channel = channel_name.replace("/", "_").replace("\\", "_")
         files_dir = self._output_dir / safe_channel / "files"
@@ -80,12 +83,22 @@ class FileDownloader:
         return results
 
     def _download_file(self, url: str, dest: Path) -> bool:
-        """Download a single file with retry logic."""
+        """Download a single file with retry logic.
+
+        Slack returns a 302 redirect to a CDN URL. requests strips the
+        Authorization header on cross-domain redirects, so we follow
+        redirects manually to preserve the token.
+        """
         headers = {"Authorization": f"Bearer {self._token}"}
 
         for attempt in range(1, self._max_retries + 1):
             try:
-                resp = requests.get(url, headers=headers, stream=True, timeout=60)
+                resp = requests.get(url, headers=headers, stream=True, timeout=60, allow_redirects=False)
+
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    redirect_url = resp.headers.get("Location", "")
+                    if redirect_url:
+                        resp = requests.get(redirect_url, headers=headers, stream=True, timeout=60)
 
                 if resp.status_code == 429:
                     retry_after = int(resp.headers.get("Retry-After", 30))
