@@ -171,6 +171,60 @@ pause
 > **Usage:** `run.bat`, `run.bat --since 2025-01-01`, `run.bat --download-files`, etc. Any CLI flags are passed through via `%*`.
 > To enable an option, remove `:: ` at the start of the line. To disable, add `:: ` back.
 
+### Channel filtering
+
+By default the tool syncs **all channels you have joined** (public + private). Use allowlist/denylist to control which channels are synced.
+
+You can use **channel names** or **channel IDs** (e.g. `C01ABCDEF12`).
+To find a channel ID: right-click the channel in Slack → **View channel details** → scroll to the bottom.
+
+#### Sync only specific channels (allowlist)
+
+```bat
+:: run.bat
+set CHANNEL_ALLOWLIST=general,engineering,C01ABCDEF12
+```
+
+```yaml
+# config.yaml
+channel_allowlist:
+  - general
+  - engineering
+  - C01ABCDEF12
+```
+
+#### Exclude specific channels (denylist)
+
+```bat
+:: run.bat
+set CHANNEL_DENYLIST=random,social
+```
+
+```yaml
+# config.yaml
+channel_denylist:
+  - random
+  - social
+```
+
+#### Combine allowlist + denylist
+
+```bat
+set CHANNEL_ALLOWLIST=general,engineering,random
+set CHANNEL_DENYLIST=random
+```
+
+Result: syncs `general` and `engineering` only. Allowlist is applied first, then denylist removes matches.
+
+#### Summary
+
+| Config | Behavior |
+|---|---|
+| Both empty (default) | Sync all channels you are a member of |
+| Allowlist only | Sync only listed channels |
+| Denylist only | Sync all channels except listed ones |
+| Both set | Allowlist first, then denylist removes from that set |
+
 ### Postgres mode
 
 ```bash
