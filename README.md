@@ -97,6 +97,80 @@ python main.py --download-files
 
 > **Note:** `--since` overrides both the watermark and `LOOKBACK_DAYS`. Without `--since`, the tool runs incrementally from the last watermark as usual.
 
+### Quick run with a batch file (Windows)
+
+Create a file called `run.bat`, paste the template below, fill in your token, and double-click to run.
+`run.bat` is gitignored so your token stays safe.
+
+```bat
+@echo off
+setlocal
+
+:: ===================
+::  REQUIRED
+:: ===================
+set SLACK_TOKEN=xoxp-your-token-here
+
+:: ===================
+::  OUTPUT
+:: ===================
+:: ndjson (default) or postgres
+set OUTPUT_MODE=ndjson
+
+:: Directory for output files (default: output)
+set OUTPUT_DIR=output
+
+:: Postgres connection string (required if OUTPUT_MODE=postgres)
+:: set DB_CONNECTION_STRING=postgresql://user:pass@localhost:5432/slack_data
+
+:: ===================
+::  CHANNEL FILTER
+:: ===================
+:: Only sync these channels (comma-separated names or IDs, empty = all)
+:: set CHANNEL_ALLOWLIST=general,engineering
+
+:: Exclude these channels
+:: set CHANNEL_DENYLIST=random,social
+
+:: ===================
+::  SYNC OPTIONS
+:: ===================
+:: How many days back on the first run (default: 90)
+set LOOKBACK_DAYS=90
+
+:: Download file attachments to output/<channel>/files/
+:: set DOWNLOAD_FILES=true
+
+:: Incremental sync: true = only fetch new messages, false = re-fetch from lookback_days
+:: set USE_WATERMARK=true
+
+:: Replace user names with hashed IDs
+:: set PSEUDONYMIZE=true
+
+:: ===================
+::  ADVANCED
+:: ===================
+:: Messages per API call (default: 200)
+:: set PAGE_SIZE=200
+
+:: Replies per API call (default: 200)
+:: set THREAD_PAGE_SIZE=200
+
+:: Max retry attempts on errors (default: 5)
+:: set MAX_RETRIES=5
+
+:: ===================
+::  RUN
+:: ===================
+python main.py -v %*
+
+endlocal
+pause
+```
+
+> **Usage:** `run.bat`, `run.bat --since 2025-01-01`, `run.bat --download-files`, etc. Any CLI flags are passed through via `%*`.
+> To enable an option, remove `:: ` at the start of the line. To disable, add `:: ` back.
+
 ### Postgres mode
 
 ```bash
