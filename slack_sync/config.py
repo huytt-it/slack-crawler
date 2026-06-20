@@ -25,6 +25,7 @@ class Config:
     thread_page_size: int = 200
     max_retries: int = 5
     pseudonymize: bool = False
+    download_files: bool = False
     since: Optional[str] = None  # ISO date, e.g. "2025-01-01"
     until: Optional[str] = None  # ISO date, e.g. "2025-06-30"
 
@@ -91,6 +92,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
         thread_page_size=int(_get("THREAD_PAGE_SIZE", 200)),
         max_retries=int(_get("MAX_RETRIES", 5)),
         pseudonymize=str(_get("PSEUDONYMIZE", "false")).lower() in ("true", "1", "yes"),
+        download_files=str(_get("DOWNLOAD_FILES", yaml_key="download_files", default="false")).lower() in ("true", "1", "yes"),
         since=_get("SYNC_SINCE", yaml_key="since"),
         until=_get("SYNC_UNTIL", yaml_key="until"),
     )

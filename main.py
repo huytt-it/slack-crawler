@@ -13,6 +13,7 @@ from typing import Any
 from slack_sync.channels import discover_channels
 from slack_sync.client import SlackClient
 from slack_sync.config import Config, load_config
+from slack_sync.files import FileDownloader
 from slack_sync.history import fetch_channel_history
 from slack_sync.state import WatermarkStore
 from slack_sync.storage import StorageBackend
@@ -43,6 +44,7 @@ def sync_channel(
     watermark_store: WatermarkStore,
     storage: StorageBackend,
     config: Config,
+    file_downloader: FileDownloader | None = None,
 ) -> int:
     """Sync a single channel incrementally. Returns total messages stored."""
     if config.since:
@@ -90,6 +92,12 @@ def sync_channel(
             deduplicated.append(msg)
     deduplicated.sort(key=lambda m: m["ts"])
 
+    if file_downloader:
+        for msg in deduplicated:
+            downloaded = file_downloader.download_message_files(msg, channel_name)
+            if downloaded:
+                msg["downloaded_files"] = downloaded
+
     stored = storage.store_messages(channel_id, channel_name, deduplicated)
 
     max_ts = max(m["ts"] for m in deduplicated)
@@ -104,6 +112,14 @@ def run(config: Config) -> None:
     client = SlackClient(token=config.slack_token, max_retries=config.max_retries)
     watermark_store = WatermarkStore(config.state_dir)
     storage = build_storage(config)
+    file_downloader: FileDownloader | None = None
+    if config.download_files:
+        file_downloader = FileDownloader(
+            token=config.slack_token,
+            output_dir=config.output_dir,
+            max_retries=config.max_retries,
+        )
+        logger.info("File download enabled.")
 
     try:
         channels = discover_channels(
@@ -120,7 +136,7 @@ def run(config: Config) -> None:
         total = 0
         for ch in channels:
             try:
-                count = sync_channel(client, ch.id, ch.name, watermark_store, storage, config)
+                count = sync_channel(client, ch.id, ch.name, watermark_store, storage, config, file_downloader)
                 total += count
             except Exception:
                 logger.exception("Failed to sync channel %s (%s). Continuing.", ch.name, ch.id)
@@ -140,6 +156,7 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
     parser.add_argument("--since", help="Start date (YYYY-MM-DD). Overrides watermark and lookback_days.")
     parser.add_argument("--until", help="End date (YYYY-MM-DD). Only fetch messages before this date.")
+    parser.add_argument("--download-files", action="store_true", help="Download file attachments.")
     args = parser.parse_args()
 
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -155,12 +172,14 @@ def main() -> None:
         logger.error("Configuration error: %s", e)
         sys.exit(1)
 
-    if args.since or args.until:
+    if args.since or args.until or args.download_files:
         overrides: dict = {}
         if args.since:
             overrides["since"] = args.since
         if args.until:
             overrides["until"] = args.until
+        if args.download_files:
+            overrides["download_files"] = True
         from dataclasses import replace
         config = replace(config, **overrides)
 

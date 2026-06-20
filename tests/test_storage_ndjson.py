@@ -6,22 +6,25 @@ import json
 from slack_sync.storage.ndjson import NdjsonBackend
 
 
+def _make_msg(**overrides):
+    base = {
+        "channel_id": "C1", "ts": "100.0", "text": "hello", "channel_name": "general",
+        "user_id": "U1", "datetime_utc": "2025-01-01T00:00:00+00:00", "type": "message",
+        "subtype": None, "thread_ts": None, "reactions": None, "reply_count": 0, "raw": {},
+    }
+    base.update(overrides)
+    return base
+
+
 class TestNdjsonBackend:
-    def test_store_messages(self, tmp_path):
+    def test_store_messages_in_channel_dir(self, tmp_path):
         backend = NdjsonBackend(str(tmp_path / "out"))
-        messages = [
-            {"channel_id": "C1", "ts": "100.0", "text": "hello", "channel_name": "general",
-             "user_id": "U1", "datetime_utc": "2025-01-01T00:00:00+00:00", "type": "message",
-             "subtype": None, "thread_ts": None, "reactions": None, "reply_count": 0, "raw": {}},
-            {"channel_id": "C1", "ts": "101.0", "text": "world", "channel_name": "general",
-             "user_id": "U2", "datetime_utc": "2025-01-01T00:01:00+00:00", "type": "message",
-             "subtype": None, "thread_ts": None, "reactions": None, "reply_count": 0, "raw": {}},
-        ]
+        messages = [_make_msg(ts="100.0", text="hello"), _make_msg(ts="101.0", text="world")]
 
         count = backend.store_messages("C1", "general", messages)
         assert count == 2
 
-        path = tmp_path / "out" / "general.ndjson"
+        path = tmp_path / "out" / "general" / "messages.ndjson"
         assert path.exists()
         lines = path.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 2
@@ -30,18 +33,19 @@ class TestNdjsonBackend:
 
     def test_append_on_second_run(self, tmp_path):
         backend = NdjsonBackend(str(tmp_path / "out"))
-        msg1 = [{"channel_id": "C1", "ts": "100.0", "text": "first", "channel_name": "g",
-                  "user_id": "U1", "datetime_utc": None, "type": "message",
-                  "subtype": None, "thread_ts": None, "reactions": None, "reply_count": 0, "raw": {}}]
-        msg2 = [{"channel_id": "C1", "ts": "101.0", "text": "second", "channel_name": "g",
-                  "user_id": "U1", "datetime_utc": None, "type": "message",
-                  "subtype": None, "thread_ts": None, "reactions": None, "reply_count": 0, "raw": {}}]
+        backend.store_messages("C1", "general", [_make_msg(ts="100.0", text="first")])
+        backend.store_messages("C1", "general", [_make_msg(ts="101.0", text="second")])
 
-        backend.store_messages("C1", "g", msg1)
-        backend.store_messages("C1", "g", msg2)
-
-        lines = (tmp_path / "out" / "g.ndjson").read_text(encoding="utf-8").strip().split("\n")
+        lines = (tmp_path / "out" / "general" / "messages.ndjson").read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 2
+
+    def test_separate_dirs_per_channel(self, tmp_path):
+        backend = NdjsonBackend(str(tmp_path / "out"))
+        backend.store_messages("C1", "general", [_make_msg()])
+        backend.store_messages("C2", "random", [_make_msg(channel_id="C2", channel_name="random")])
+
+        assert (tmp_path / "out" / "general" / "messages.ndjson").exists()
+        assert (tmp_path / "out" / "random" / "messages.ndjson").exists()
 
     def test_store_empty_returns_zero(self, tmp_path):
         backend = NdjsonBackend(str(tmp_path / "out"))

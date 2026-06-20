@@ -55,6 +55,7 @@ cp config.example.yaml config.yaml
 | `THREAD_PAGE_SIZE` | No | `200` | Page size for conversations.replies |
 | `MAX_RETRIES` | No | `5` | Max retries on transient errors / 429 |
 | `PSEUDONYMIZE` | No | `false` | Replace user names with hashed IDs |
+| `DOWNLOAD_FILES` | No | `false` | Download file attachments to `output/<channel>/files/` |
 | `SYNC_SINCE` | No | — | Start date `YYYY-MM-DD` (overrides watermark & lookback) |
 | `SYNC_UNTIL` | No | — | End date `YYYY-MM-DD` (only fetch messages before this) |
 
@@ -88,6 +89,9 @@ python main.py --since 2025-01-01 --until 2025-06-30
 
 # Export everything from a specific date to now
 python main.py --since 2025-03-01
+
+# Download file attachments
+python main.py --download-files
 ```
 
 > **Note:** `--since` overrides both the watermark and `LOOKBACK_DAYS`. Without `--since`, the tool runs incrementally from the last watermark as usual.
@@ -167,8 +171,9 @@ Start in: C:\path\to\SlackCrawler
 2. **User resolution** — calls `users.list` once per run, caches the mapping.
 3. **Incremental sync** — for each channel, reads the stored watermark (the `ts` of the last synced message). Fetches only messages with `ts > watermark` using the `oldest` parameter.
 4. **Thread fetch** — for any message with `reply_count > 0`, fetches the full thread via `conversations.replies`.
-5. **Persist** — writes normalized messages to NDJSON files or Postgres.
-6. **Advance watermark** — only after a channel completes successfully, so a crash mid-run won't skip messages on the next run.
+5. **File download** (optional) — if `--download-files` is set, downloads attachments to `output/<channel>/files/`.
+6. **Persist** — writes normalized messages to NDJSON files or Postgres.
+7. **Advance watermark** — only after a channel completes successfully, so a crash mid-run won't skip messages on the next run.
 
 ### Rate limits
 
@@ -176,9 +181,26 @@ This is an internal app, so it uses normal Slack API rate limits (not the reduce
 
 ---
 
-## 6. Output Schema
+## 6. Output Structure
 
-Each message is stored with this normalized structure:
+```
+output/
+├── general/
+│   ├── messages.ndjson
+│   └── files/                  # only when --download-files is enabled
+│       ├── F07ABC_report.pdf
+│       └── F07DEF_screenshot.png
+├── engineering/
+│   ├── messages.ndjson
+│   └── files/
+└── _users.json
+```
+
+Each channel gets its own directory. Messages are in `messages.ndjson`, file attachments (if enabled) are in `files/`.
+
+### Message Schema
+
+Each line in `messages.ndjson` is a JSON object:
 
 | Field | Type | Description |
 |---|---|---|
@@ -194,6 +216,7 @@ Each message is stored with this normalized structure:
 | `reactions` | json | Reaction data (null if none) |
 | `reply_count` | int | Number of thread replies |
 | `raw` | json | Original Slack API response |
+| `downloaded_files` | json / absent | List of downloaded files (only present when `--download-files` is used and message has attachments) |
 
 ---
 

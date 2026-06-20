@@ -1,3 +1,4 @@
 slack_sdk>=3.27,<4
 pyyaml>=6.0,<7
 psycopg2-binary>=2.9,<3
+requests>=2.31,<3

@@ -34,6 +34,9 @@ max_retries: 5
 # Replace user names with stable hashed IDs
 pseudonymize: false
 
+# Download file attachments to output/<channel>/files/
+download_files: false
+
 # Date range filter (YYYY-MM-DD). Overrides watermark/lookback when set.
 # Can also be passed via CLI: --since / --until
 # since: "2025-01-01"

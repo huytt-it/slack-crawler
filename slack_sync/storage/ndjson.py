@@ -1,4 +1,4 @@
-"""NDJSON file storage backend — one file per channel, append-friendly."""
+"""NDJSON file storage backend — one directory per channel, append-friendly."""
 
 from __future__ import annotations
 
@@ -13,7 +13,16 @@ logger = logging.getLogger(__name__)
 
 
 class NdjsonBackend(StorageBackend):
-    """Writes messages as newline-delimited JSON, one file per channel."""
+    """Writes messages as newline-delimited JSON, one directory per channel.
+
+    Structure:
+        output/
+        ├── general/
+        │   └── messages.ndjson
+        ├── engineering/
+        │   └── messages.ndjson
+        └── _users.json
+    """
 
     def __init__(self, output_dir: str) -> None:
         self._dir = Path(output_dir)
@@ -24,7 +33,9 @@ class NdjsonBackend(StorageBackend):
             return 0
 
         safe_name = channel_name.replace("/", "_").replace("\\", "_")
-        path = self._dir / f"{safe_name}.ndjson"
+        channel_dir = self._dir / safe_name
+        channel_dir.mkdir(parents=True, exist_ok=True)
+        path = channel_dir / "messages.ndjson"
 
         with open(path, "a", encoding="utf-8") as f:
             for msg in messages:

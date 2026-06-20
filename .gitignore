@@ -1,6 +1,7 @@
 # Secrets
 .env
 *.env
+run.bat
 
 # Sync output
 output/
