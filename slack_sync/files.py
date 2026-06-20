@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import requests
 
@@ -21,6 +21,7 @@ class FileDownloader:
         self._output_dir = Path(output_dir)
         self._max_retries = max_retries
         self._downloaded: set[str] = set()
+        self._file_index: dict[str, list[dict[str, Any]]] = {}
 
     def download_message_files(
         self, msg: dict[str, Any], channel_name: str,
@@ -80,7 +81,59 @@ class FileDownloader:
                 })
                 logger.debug("Downloaded %s -> %s", original_name, local_path)
 
+        if results:
+            for r in results:
+                self._add_to_index(safe_channel, r, msg, raw)
+
         return results
+
+    def _add_to_index(
+        self, channel_key: str, file_result: dict[str, str],
+        msg: dict[str, Any], raw: dict[str, Any],
+    ) -> None:
+        """Add a downloaded file entry to the in-memory index."""
+        entry = {
+            "file_id": file_result["file_id"],
+            "file_name": file_result["name"],
+            "local_path": file_result["local_path"],
+            "channel_id": msg.get("channel_id", ""),
+            "channel_name": msg.get("channel_name", ""),
+            "sender_user_id": msg.get("user_id", ""),
+            "message_ts": msg.get("ts", ""),
+            "datetime_utc": msg.get("datetime_utc", ""),
+            "thread_ts": msg.get("thread_ts"),
+            "message_text": msg.get("text", ""),
+            "filetype": next(
+                (f.get("filetype", "") for f in raw.get("files", [])
+                 if f.get("id") == file_result["file_id"]),
+                "",
+            ),
+            "size_bytes": next(
+                (f.get("size", 0) for f in raw.get("files", [])
+                 if f.get("id") == file_result["file_id"]),
+                0,
+            ),
+        }
+        self._file_index.setdefault(channel_key, []).append(entry)
+
+    def save_file_indexes(self) -> None:
+        """Write _files_index.json for each channel that had downloads."""
+        for channel_key, entries in self._file_index.items():
+            index_path = self._output_dir / channel_key / "_files_index.json"
+            existing: list[dict[str, Any]] = []
+            if index_path.exists():
+                with open(index_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+
+            seen_ids = {e["file_id"] for e in existing}
+            for entry in entries:
+                if entry["file_id"] not in seen_ids:
+                    existing.append(entry)
+                    seen_ids.add(entry["file_id"])
+
+            with open(index_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, ensure_ascii=False, indent=2, default=str)
+            logger.info("Wrote file index (%d files) to %s.", len(existing), index_path)
 
     def _download_file(self, url: str, dest: Path) -> bool:
         """Download a single file with retry logic.

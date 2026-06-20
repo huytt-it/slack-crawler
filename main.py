@@ -145,6 +145,9 @@ def run(config: Config) -> None:
             except Exception:
                 logger.exception("Failed to sync channel %s (%s). Continuing.", ch.name, ch.id)
 
+        if file_downloader:
+            file_downloader.save_file_indexes()
+
         elapsed = time.monotonic() - start
         logger.info(
             "Sync complete. %d channels processed, %d messages stored in %.1fs.",

@@ -316,7 +316,8 @@ This is an internal app, so it uses normal Slack API rate limits (not the reduce
 output/
 ├── general/
 │   ├── messages.ndjson
-│   └── files/                  # only when --download-files is enabled
+│   ├── _files_index.json       # file metadata: sender, datetime, thread (only with --download-files)
+│   └── files/                  # downloaded attachments (only with --download-files)
 │       ├── F07ABC_report.pdf
 │       └── F07DEF_screenshot.png
 ├── engineering/
@@ -326,6 +327,25 @@ output/
 ```
 
 Each channel gets its own directory. Messages are in `messages.ndjson`, file attachments (if enabled) are in `files/`.
+
+### Files Index
+
+When `--download-files` is enabled, each channel with downloaded files gets a `_files_index.json` that maps every file to its message context:
+
+| Field | Description |
+|---|---|
+| `file_id` | Slack file ID |
+| `file_name` | Original file name |
+| `local_path` | Path to the downloaded file |
+| `channel_id` | Channel the file was shared in |
+| `channel_name` | Channel name |
+| `sender_user_id` | User ID of the person who shared the file |
+| `message_ts` | Timestamp of the message containing the file |
+| `datetime_utc` | Human-readable UTC datetime |
+| `thread_ts` | Thread timestamp (null if not in a thread) |
+| `message_text` | Text of the message the file was attached to |
+| `filetype` | File type (e.g. `jpg`, `pdf`, `png`) |
+| `size_bytes` | File size in bytes |
 
 ### Message Schema
 
