@@ -73,7 +73,7 @@ class WatermarkStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, indent=2)
+            json.dump(self._data, f, ensure_ascii=False, indent=2)
         tmp.replace(self._path)
 
     # --- backward-compatible simple accessors (used by ad-hoc callers/tests) ---
