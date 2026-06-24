@@ -26,11 +26,49 @@ A CLI tool that pulls message history from Slack channels incrementally and pers
 >
 > **DMs:** add `im:history` / `mpim:history` and include `im` / `mpim` in `CHANNEL_TYPES`.
 >
-> **Why `users:read` is required:** Slack messages contain only the `user_id`, not names. Without this scope the tool cannot build `_users.json` and the run aborts. Keep it — it's read-only and cheap.
+> **Why `users:read` is required:** see [the section below](#why-usersread-is-needed--what-data-it-unlocks) — messages carry only `user_id`, this scope maps it to names.
 
 4. **Install to Workspace** and copy the **User OAuth Token** (`xoxp-...`).
 
 > A **Bot Token** (`xoxb-...`) also works but will only see channels the bot has been invited to. User tokens see all channels the installing user is a member of.
+
+### Why `users:read` is needed — what data it unlocks
+
+Slack messages are stored **by reference**: a message only carries the author's
+`user_id`, never their name. To know *who* wrote something, the `user_id` must be
+resolved against the member directory — which is exactly what `users:read`
+(the `users.list` / `users.info` methods) provides.
+
+**A raw message from `conversations.history` looks like this** — no name anywhere:
+
+```json
+{ "type": "message", "user": "U0BBG7YC031", "text": "Done, merged the PR", "ts": "1781925738.067639" }
+```
+
+**`users:read` returns the user object** that maps that ID to identity. The tool
+extracts these fields into `_users.json`:
+
+| Field | Type | Example | Source (`users.list` → `member`) |
+|---|---|---|---|
+| `id` | string | `U0BBG7YC031` | `member.id` |
+| `display_name` | string | `huytranthanhit` | `member.profile.display_name` |
+| `real_name` | string | `Huy Trần Thanh` | `member.profile.real_name` |
+| `email` | string \| null | `huy@company.com` | `member.profile.email` *(needs `users:read.email`)* |
+
+So `_users.json` becomes the lookup table:
+
+```json
+{ "U0BBG7YC031": { "id": "U0BBG7YC031", "display_name": "huytranthanhit", "real_name": "Huy Trần Thanh", "email": null } }
+```
+
+**Without `users:read`:** messages still have `user_id`, but there is no way to
+translate `U0BBG7YC031` into a human name — every message reads as an opaque ID,
+which is poor context for analytics/RAG. The tool also calls `users.list` at
+startup, so a missing scope aborts the run. Keep it — it is read-only and cheap.
+
+> `users:read.email` is separate and **optional**: it only adds the `email` field,
+> used for pseudonymization (a stable hash of the email). With pseudonymization
+> off (default), you don't need it.
 
 ---
 
