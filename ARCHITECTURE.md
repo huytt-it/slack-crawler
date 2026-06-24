@@ -130,7 +130,7 @@ output/
 | `config.py` | Immutable `Config` dataclass; merges env vars > YAML > defaults; validates. | Date format + output-mode + postgres-connection validation at construction. |
 | `client.py` | Wraps `slack_sdk.WebClient`. Retries 429 (Retry-After + jitter) and Slack transient errors up to `max_retries`. | Acquires a `RateLimiter` token before each call. Thread-safe (stateless per call). |
 | `ratelimit.py` | `RateLimiter` token bucket + `PerMethodRateLimiter` (one bucket per Slack method) so each method runs at its own tier. | History and replies have separate Slack buckets → fetched in parallel, not shared. |
-| `channels.py` | `users.conversations` discovery (public + private), then allow/deny filtering by name or ID. | Cursor-paginated; unlimited channel count. |
+| `channels.py` | `users.conversations` discovery for the configured `channel_types`, then allow/deny filtering by name or ID. | Cursor-paginated; degrades to public_channel (with a warning) if the token lacks private scope — no crash. |
 | `users.py` | `users.list` cached once per run; maps id → names/email. Optional pseudonymization (stable SHA-256 of email). | Cache loaded lazily; pseudonymization is a clean hook. |
 | `state.py` | Per-channel watermark + in-flight descent checkpoint. Thread-safe; atomic writes (tmp+rename). | `plan_run` / `checkpoint` / `complete`; migrates old flat format. |
 | `history.py` | `iter_channel_history` **streams** pages (generator) so memory is bounded; `normalize_message` maps to schema. | `fetch_channel_history` wrapper kept for ad-hoc/test use. |
@@ -283,6 +283,7 @@ boundaries. Deduplicate downstream on `(channel_id, ts)` if exactness is require
 | `STATE_DIR` / `state_dir` | `.state` | checkpoint/watermark dir |
 | `CHANNEL_ALLOWLIST` / `channel_allowlist` | — | only these channels (name or id) |
 | `CHANNEL_DENYLIST` / `channel_denylist` | — | exclude these channels |
+| `CHANNEL_TYPES` / `channel_types` | `public_channel` | types to sync: `public_channel,private_channel,mpim,im` |
 | `LOOKBACK_DAYS` / `lookback_days` | `90` | first-run history window |
 | `PAGE_SIZE` / `page_size` | `1000` | conversations.history page size (max 1000) |
 | `THREAD_PAGE_SIZE` / `thread_page_size` | `1000` | conversations.replies page size |
@@ -337,9 +338,11 @@ message_ts, datetime_utc, thread_ts, message_text, filetype, size_bytes`
 
 ## 10. Required Slack Scopes (user token)
 
-`channels:history`, `channels:read`, `groups:history`, `groups:read`, `users:read`
+Minimum (public channels, default): `channels:history` · `channels:read` · `users:read`.
+Add for more: `groups:history` + `groups:read` (private, with `channel_types=...,private_channel`)
 · `users:read.email` (pseudonymization) · `files:read` (file download)
-· `im:history`, `mpim:history` (DMs, requires code change to channel types).
+· `im:history` / `mpim:history` (DMs, with `im` / `mpim` in `channel_types`).
+Missing private scope degrades to public automatically rather than failing.
 
 ---
 

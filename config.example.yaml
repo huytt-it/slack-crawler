@@ -21,6 +21,12 @@ state_dir: .state
 channel_allowlist: []
 channel_denylist: []
 
+# Which conversation types to sync (comma-separated):
+#   public_channel, private_channel, mpim, im
+# Default is public_channel only. Add private_channel (needs groups:read) for
+# private channels. If the token lacks the scope, it falls back to public safely.
+channel_types: public_channel
+
 # How far back to look on the first run (days)
 lookback_days: 90
 

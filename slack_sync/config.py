@@ -20,6 +20,7 @@ class Config:
     state_dir: str = ".state"
     channel_allowlist: list[str] = field(default_factory=list)
     channel_denylist: list[str] = field(default_factory=list)
+    channel_types: str = "public_channel"
     lookback_days: int = 90
     page_size: int = 1000
     thread_page_size: int = 1000
@@ -42,6 +43,13 @@ class Config:
             raise ValueError(f"Invalid output_mode: {self.output_mode}")
         if self.output_mode == "postgres" and not self.db_connection_string:
             raise ValueError("DB_CONNECTION_STRING is required for postgres output mode")
+        valid_types = {"public_channel", "private_channel", "mpim", "im"}
+        requested_types = {t.strip() for t in self.channel_types.split(",") if t.strip()}
+        if not requested_types:
+            raise ValueError("channel_types must list at least one conversation type")
+        invalid = requested_types - valid_types
+        if invalid:
+            raise ValueError(f"Invalid channel_types: {sorted(invalid)}. Allowed: {sorted(valid_types)}")
         for field_name in ("since", "until"):
             val = getattr(self, field_name)
             if val:
@@ -93,6 +101,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
         state_dir=_get("STATE_DIR", ".state"),
         channel_allowlist=_get_list("CHANNEL_ALLOWLIST"),
         channel_denylist=_get_list("CHANNEL_DENYLIST"),
+        channel_types=_get("CHANNEL_TYPES", yaml_key="channel_types", default="public_channel"),
         lookback_days=int(_get("LOOKBACK_DAYS", 90)),
         page_size=int(_get("PAGE_SIZE", 1000)),
         thread_page_size=int(_get("THREAD_PAGE_SIZE", 1000)),

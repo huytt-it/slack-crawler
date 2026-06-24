@@ -49,6 +49,17 @@ class TestConfigValidation:
         assert cfg.since == "2025-01-01"
         assert cfg.until == "2025-06-30"
 
+    def test_default_channel_types_is_public(self):
+        assert Config(slack_token="xoxp-test").channel_types == "public_channel"
+
+    def test_invalid_channel_types_raises(self):
+        with pytest.raises(ValueError, match="Invalid channel_types"):
+            Config(slack_token="xoxp-test", channel_types="public_channel,bogus")
+
+    def test_valid_multiple_channel_types(self):
+        cfg = Config(slack_token="xoxp-test", channel_types="public_channel,private_channel")
+        assert cfg.channel_types == "public_channel,private_channel"
+
 
 class TestLoadConfig:
     def test_load_from_env(self, monkeypatch, tmp_path):

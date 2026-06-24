@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from slack_sdk.errors import SlackApiError
+
 from slack_sync.client import SlackClient
 
 logger = logging.getLogger(__name__)
@@ -18,23 +20,14 @@ class Channel:
     is_private: bool
 
 
-def discover_channels(
-    client: SlackClient,
-    allowlist: Optional[list[str]] = None,
-    denylist: Optional[list[str]] = None,
-) -> list[Channel]:
-    """Fetch all channels the token's identity is a member of, then apply filters.
-
-    Allowlist/denylist entries can be channel IDs or channel names.
-    If allowlist is non-empty, only those channels are included.
-    Denylist is always applied after allowlist.
-    """
+def _list_conversations(client: SlackClient, types: str) -> list[Channel]:
+    """Paginate users.conversations for the given comma-separated types."""
     channels: list[Channel] = []
     cursor: Optional[str] = None
 
     while True:
         kwargs: dict = {
-            "types": "public_channel,private_channel",
+            "types": types,
             "exclude_archived": True,
             "limit": 200,
         }
@@ -53,7 +46,40 @@ def discover_channels(
         if not cursor:
             break
 
-    logger.info("Discovered %d channels before filtering.", len(channels))
+    return channels
+
+
+def discover_channels(
+    client: SlackClient,
+    allowlist: Optional[list[str]] = None,
+    denylist: Optional[list[str]] = None,
+    types: str = "public_channel",
+) -> list[Channel]:
+    """Fetch the channels the token's identity is a member of, then apply filters.
+
+    `types` is a comma-separated list of Slack conversation types
+    (public_channel, private_channel, mpim, im). If the token lacks the scope
+    for a requested type (e.g. private_channel without groups:read), discovery
+    degrades gracefully to public_channel instead of crashing.
+
+    Allowlist/denylist entries can be channel IDs or names. Allowlist (if set)
+    is applied first, then denylist removes matches.
+    """
+    try:
+        channels = _list_conversations(client, types)
+    except SlackApiError as e:
+        error = e.response.get("error", "") if e.response else ""
+        if error == "missing_scope" and types != "public_channel":
+            logger.warning(
+                "Token is missing scope for requested types '%s'. "
+                "Falling back to public_channel only (add groups:read for private channels).",
+                types,
+            )
+            channels = _list_conversations(client, "public_channel")
+        else:
+            raise
+
+    logger.info("Discovered %d channels (types=%s) before filtering.", len(channels), types)
 
     if allowlist:
         allow_set = set(allowlist)

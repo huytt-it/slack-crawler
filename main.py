@@ -128,6 +128,7 @@ def run(config: Config, dry_run: bool = False) -> None:
         client,
         allowlist=config.channel_allowlist or None,
         denylist=config.channel_denylist or None,
+        types=config.channel_types,
     )
     if not channels:
         logger.warning("No channels to sync.")

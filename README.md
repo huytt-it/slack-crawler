@@ -12,17 +12,21 @@ A CLI tool that pulls message history from Slack channels incrementally and pers
 2. Name it (e.g. "Data Sync") and select your workspace.
 3. Go to **OAuth & Permissions** → **User Token Scopes** and add:
 
-| Scope | Purpose |
-|---|---|
-| `channels:history` | Read messages in public channels |
-| `channels:read` | List public channels |
-| `groups:history` | Read messages in private channels |
-| `groups:read` | List private channels |
-| `users:read` | Resolve user IDs to names |
-| `users:read.email` | Resolve user emails (optional, for pseudonymization) |
-| `files:read` | Download file attachments (required if using `--download-files`) |
+| Scope | Required? | Purpose |
+|---|---|---|
+| `channels:history` | **Yes** | Read messages in public channels |
+| `channels:read` | **Yes** | List public channels |
+| `users:read` | **Yes** | Resolve user IDs to names (see note) |
+| `groups:history` | Private only | Read messages in private channels |
+| `groups:read` | Private only | List private channels |
+| `users:read.email` | Optional | Resolve emails (only for pseudonymization) |
+| `files:read` | If downloading | Download file attachments (`--download-files`) |
 
-> **Optional DM scopes:** Add `im:history` and `mpim:history` if you need to pull direct messages. You will also need to add `im` and `mpim` to the `types` parameter in `channels.py`.
+> **Default is public channels only** (`CHANNEL_TYPES=public_channel`), so the minimum scope set is `channels:history` + `channels:read` + `users:read`. To also sync private channels, add `groups:history` + `groups:read` and set `CHANNEL_TYPES=public_channel,private_channel`. If the token lacks the private scope, discovery **falls back to public automatically** (no crash).
+>
+> **DMs:** add `im:history` / `mpim:history` and include `im` / `mpim` in `CHANNEL_TYPES`.
+>
+> **Why `users:read` is required:** Slack messages contain only the `user_id`, not names. Without this scope the tool cannot build `_users.json` and the run aborts. Keep it — it's read-only and cheap.
 
 4. **Install to Workspace** and copy the **User OAuth Token** (`xoxp-...`).
 
@@ -51,6 +55,7 @@ cp config.example.yaml config.yaml
 | `STATE_DIR` | No | `.state` | Directory for watermark state |
 | `CHANNEL_ALLOWLIST` | No | — | Comma-separated channel IDs or names |
 | `CHANNEL_DENYLIST` | No | — | Comma-separated channel IDs or names |
+| `CHANNEL_TYPES` | No | `public_channel` | Conversation types: `public_channel,private_channel,mpim,im` |
 | `LOOKBACK_DAYS` | No | `90` | First-run lookback window (days) |
 | `PAGE_SIZE` | No | `1000` | Page size for conversations.history (max 1000; bigger = fewer rate-limited requests) |
 | `THREAD_PAGE_SIZE` | No | `1000` | Page size for conversations.replies |
@@ -253,10 +258,26 @@ Result: syncs `general` and `engineering` only. Allowlist is applied first, then
 
 | Config | Behavior |
 |---|---|
-| Both empty (default) | Sync all channels you are a member of |
+| Both empty (default) | Sync all channels you are a member of (of the configured types) |
 | Allowlist only | Sync only listed channels |
 | Denylist only | Sync all channels except listed ones |
 | Both set | Allowlist first, then denylist removes from that set |
+
+#### Public vs private (`channel_types`)
+
+Controls which conversation types are discovered. **Default: `public_channel` only.**
+
+```bat
+:: run.bat — public channels only (default)
+set CHANNEL_TYPES=public_channel
+
+:: include private channels too (needs groups:read + groups:history)
+set CHANNEL_TYPES=public_channel,private_channel
+```
+
+Valid values: `public_channel`, `private_channel`, `mpim`, `im`. If the token
+lacks the scope for a requested type, discovery **falls back to `public_channel`
+and logs a warning** instead of crashing.
 
 ### Postgres mode
 
