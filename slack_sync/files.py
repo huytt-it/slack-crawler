@@ -43,6 +43,11 @@ class FileDownloader:
         self._lock = threading.Lock()
         self._local = threading.local()
 
+    @property
+    def downloaded_count(self) -> int:
+        with self._lock:
+            return len(self._downloaded)
+
     def _session(self) -> requests.Session:
         s = getattr(self._local, "session", None)
         if s is None:

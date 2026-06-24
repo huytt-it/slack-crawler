@@ -147,6 +147,35 @@ python main.py --download-files
 python main.py --dry-run --download-files
 ```
 
+### Console output
+
+The console shows only **config, progress, and a final summary** — never the
+collected messages themselves (those go to the output files). A run prints a
+config banner, per-channel counts as they finish, and a status summary:
+
+```
+==================================================
+SlackCrawler
+  token         : user token (xoxp-...)
+  output        : ndjson -> output
+  channel types : public_channel
+  range         : incremental (watermark); first-run lookback 90d
+  download files: yes
+  concurrency   : 4 ch / 4 file | page_size 1000 | api 1.0/s
+==================================================
+Syncing 3 channels with 3 worker(s)...
+Channel general: 1,240 messages stored.
+--------------------------------------------------
+  general                          1,240 msgs
+  engineering                        430 msgs
+  random                          FAILED
+--------------------------------------------------
+Done: 3 channels (2 ok, 1 failed) | 1,670 messages | 5 files | 12.3s
+```
+
+`-v/--verbose` adds the tool's own debug lines (per-page fetch counts) but still
+**never dumps API response bodies** — the Slack SDK's data logging is suppressed.
+
 ### Dry run (estimate before a big pull)
 
 `--dry-run` samples one page per channel and prints an estimate without downloading anything:

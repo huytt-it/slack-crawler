@@ -116,10 +116,44 @@ def sync_channel(
     return total
 
 
+def _token_kind(token: str) -> str:
+    if token.startswith("xoxb-"):
+        return "bot token (xoxb-...)"
+    if token.startswith("xoxp-"):
+        return "user token (xoxp-...)"
+    return "token set"
+
+
+def _log_config(config: Config, dry_run: bool) -> None:
+    """Print the effective configuration (never the token or collected data)."""
+    logger.info("=" * 52)
+    logger.info("SlackCrawler%s", "  [DRY RUN]" if dry_run else "")
+    logger.info("  token         : %s", _token_kind(config.slack_token))
+    dest = config.output_dir if config.output_mode == "ndjson" else "(postgres)"
+    logger.info("  output        : %s -> %s", config.output_mode, dest)
+    logger.info("  channel types : %s", config.channel_types)
+    if config.channel_allowlist:
+        logger.info("  allowlist     : %s", ",".join(config.channel_allowlist))
+    if config.channel_denylist:
+        logger.info("  denylist      : %s", ",".join(config.channel_denylist))
+    if config.since or config.until:
+        logger.info("  range         : since=%s until=%s", config.since or "-", config.until or "now")
+    elif config.use_watermark:
+        logger.info("  range         : incremental (watermark); first-run lookback %dd", config.lookback_days)
+    else:
+        logger.info("  range         : lookback %dd (watermark off)", config.lookback_days)
+    logger.info("  download files: %s", "yes" if config.download_files else "no")
+    logger.info("  store raw     : %s", "yes" if config.store_raw else "no")
+    logger.info("  concurrency   : %d ch / %d file | page_size %d | api %.1f/s",
+                config.max_workers, config.file_workers, config.page_size, config.api_rate_per_sec)
+    logger.info("=" * 52)
+
+
 def run(config: Config, dry_run: bool = False) -> None:
     """Execute the full sync pipeline."""
     start = time.monotonic()
     now_ts = str(datetime.now(timezone.utc).timestamp())
+    _log_config(config, dry_run)
     rate_limiter = PerMethodRateLimiter(config.api_rate_per_sec, burst=max(2, config.max_workers))
     client = SlackClient(config.slack_token, max_retries=config.max_retries, rate_limiter=rate_limiter)
     watermark_store = WatermarkStore(config.state_dir)
@@ -156,7 +190,6 @@ def run(config: Config, dry_run: bool = False) -> None:
             max_file_size_mb=config.max_file_size_mb,
             workers=config.file_workers,
         )
-        logger.info("File download enabled.")
 
     try:
         user_resolver = UserResolver(client, pseudonymize=config.pseudonymize)
@@ -164,9 +197,10 @@ def run(config: Config, dry_run: bool = False) -> None:
         storage.store_users(user_dicts)
 
         workers = max(1, min(config.max_workers, len(channels)))
-        logger.info("Syncing %d channels with %d worker(s).", len(channels), workers)
+        logger.info("Syncing %d channels with %d worker(s)...", len(channels), workers)
 
-        total = 0
+        results: dict[str, int | None] = {}
+        done = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(
@@ -177,18 +211,31 @@ def run(config: Config, dry_run: bool = False) -> None:
             }
             for fut in as_completed(futures):
                 ch = futures[fut]
+                done += 1
                 try:
-                    total += fut.result()
+                    results[ch.name] = fut.result()
                 except Exception:
-                    logger.exception("Failed to sync channel %s (%s). Continuing.", ch.name, ch.id)
+                    logger.exception("[%d/%d] channel %s (%s) FAILED. Continuing.",
+                                     done, len(channels), ch.name, ch.id)
+                    results[ch.name] = None
 
         if file_downloader:
             file_downloader.save_file_indexes()
 
         elapsed = time.monotonic() - start
+        ok = sum(1 for v in results.values() if v is not None)
+        failed = sum(1 for v in results.values() if v is None)
+        total = sum(v for v in results.values() if v)
+
+        logger.info("-" * 52)
+        for name, cnt in sorted(results.items()):
+            status = f"{cnt:>9,} msgs" if cnt is not None else "    FAILED"
+            logger.info("  %-30s %s", name[:30], status)
+        logger.info("-" * 52)
+        extra = f" | {file_downloader.downloaded_count:,} files" if file_downloader else ""
         logger.info(
-            "Sync complete. %d channels processed, %d messages stored in %.1fs.",
-            len(channels), total, elapsed,
+            "Done: %d channels (%d ok, %d failed) | %s messages%s | %.1fs",
+            len(results), ok, failed, f"{total:,}", extra, elapsed,
         )
     finally:
         storage.close()
@@ -208,9 +255,13 @@ def main() -> None:
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    # Never let the SDK/HTTP libraries dump request/response bodies (the collected
+    # data) to the console, even in verbose mode. We only want our own progress.
+    for noisy in ("slack_sdk", "urllib3", "requests"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     try:
         config = load_config(args.config)
