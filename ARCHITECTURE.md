@@ -346,7 +346,57 @@ Missing private scope degrades to public automatically rather than failing.
 
 ---
 
-## 11. Known Limitations
+## 11. Dependencies & External Services
+
+### Runtime dependencies (`requirements.txt`)
+
+| Package | Pin | Installed | Used by | Purpose | Required? |
+|---|---|---|---|---|---|
+| `slack_sdk` | `>=3.27,<4` | 3.42.0 | `client.py`, `channels.py` | Slack Web API client (`WebClient`, error types) | **Always** |
+| `requests` | `>=2.31,<3` | 2.34.2 | `files.py` | HTTP download of file attachments | Only with `--download-files` |
+| `pyyaml` | `>=6.0,<7` | 6.0.3 | `config.py` | Parse the YAML config file | Only if using `config.yaml` |
+| `psycopg2-binary` | `>=2.9,<3` | — | `storage/postgres.py` | PostgreSQL driver (lazy import) | Only with `OUTPUT_MODE=postgres` |
+
+> The default NDJSON path needs only `slack_sdk` (plus `requests` when downloading
+> files). `pyyaml` and `psycopg2-binary` are situational.
+
+### Transitive dependencies
+- `requests` → `urllib3`, `certifi`, `charset-normalizer`, `idna`.
+- `slack_sdk` (sync `WebClient`) uses the standard-library `urllib` — no extra runtime packages.
+
+### Dev / test only (not in `requirements.txt`)
+- `pytest` — test runner (`pip install pytest`). Not required to run the tool.
+
+### Standard library only (no install)
+`argparse`, `logging`, `sys`, `os`, `time`, `json`, `hashlib`, `threading`,
+`random`, `shutil`, `dataclasses`, `datetime`, `pathlib`, `typing`, `abc`,
+`collections.abc`, `concurrent.futures`, `urllib.error`, `__future__`.
+
+### External services / network egress
+
+| Destination | Protocol | When | What is sent |
+|---|---|---|---|
+| `slack.com/api/*` | HTTPS | always | API requests + `SLACK_TOKEN` (Authorization: Bearer) |
+| `files.slack.com`, `<workspace>.slack.com` | HTTPS | only `--download-files` | Bearer token to fetch attachments (auth-preserving redirect) |
+| Your PostgreSQL server | TCP | only `OUTPUT_MODE=postgres` | Upserted rows (host from `DB_CONNECTION_STRING`) |
+
+### Slack Web API methods used (all read-only)
+
+| Method | Tier | Module |
+|---|---|---|
+| `users.conversations` | 3 | `channels.py` (discovery) |
+| `conversations.history` | 3 | `history.py`, `probe.py` |
+| `conversations.replies` | 3 | `threads.py` |
+| `users.list` | 2 | `users.py` |
+
+> **No telemetry, analytics, or other outbound calls.** The tool talks only to
+> Slack (and optionally your own Postgres). Secrets (`SLACK_TOKEN`,
+> `DB_CONNECTION_STRING`) are read from env/config, sent only to their respective
+> services, and never written to logs.
+
+---
+
+## 12. Known Limitations
 
 - **No exact message count** from Slack → estimates are order-of-magnitude.
 - **New replies to old threads** (parent older than the watermark) aren't re-detected
@@ -360,7 +410,7 @@ Missing private scope degrades to public automatically rather than failing.
 
 ---
 
-## 12. Deployment / Scheduling
+## 13. Deployment / Scheduling
 
 One-shot CLI; schedule with cron, GitHub Actions, Azure Functions Timer, or
 Windows Task Scheduler (see README). For CI/serverless, **persist `.state/`**
