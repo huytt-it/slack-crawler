@@ -154,24 +154,26 @@ collected messages themselves (those go to the output files). A run prints a
 config banner, per-channel counts as they finish, and a status summary:
 
 ```
-==================================================
-SlackCrawler
-  token         : user token (xoxp-...)
-  output        : ndjson -> output
-  channel types : public_channel
-  range         : incremental (watermark); first-run lookback 90d
-  download files: yes
-  concurrency   : 4 ch / 4 file | page_size 1000 | api 1.0/s
-==================================================
+========================================================
+  SlackCrawler  |  this run
+--------------------------------------------------------
+  Run     : 2026-06-24 14:43 UTC | incremental (first-run lookback 90d)
+  Source  : public_channel | all channels
+  Output  : ndjson -> output | raw=on files=on
+  Engine  : 4 ch / 4 file workers | page 1000 | 1.0 req/s
+  Auth    : user token (xoxp-...)
+========================================================
 Syncing 3 channels with 3 worker(s)...
 Channel general: 1,240 messages stored.
---------------------------------------------------
+--------------------------------------------------------
   general                          1,240 msgs
   engineering                        430 msgs
   random                          FAILED
---------------------------------------------------
+--------------------------------------------------------
 Done: 3 channels (2 ok, 1 failed) | 1,670 messages | 5 files | 12.3s
 ```
+
+The config section groups the run's settings into five lines — **Run** (mode + range), **Source** (channel types + filter), **Output** (format + flags), **Engine** (concurrency + rate), **Auth** (token kind).
 
 `-v/--verbose` adds the tool's own debug lines (per-page fetch counts) but still
 **never dumps API response bodies** — the Slack SDK's data logging is suppressed.

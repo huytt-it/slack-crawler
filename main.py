@@ -125,28 +125,44 @@ def _token_kind(token: str) -> str:
 
 
 def _log_config(config: Config, dry_run: bool) -> None:
-    """Print the effective configuration (never the token or collected data)."""
-    logger.info("=" * 52)
-    logger.info("SlackCrawler%s", "  [DRY RUN]" if dry_run else "")
-    logger.info("  token         : %s", _token_kind(config.slack_token))
-    dest = config.output_dir if config.output_mode == "ndjson" else "(postgres)"
-    logger.info("  output        : %s -> %s", config.output_mode, dest)
-    logger.info("  channel types : %s", config.channel_types)
-    if config.channel_allowlist:
-        logger.info("  allowlist     : %s", ",".join(config.channel_allowlist))
-    if config.channel_denylist:
-        logger.info("  denylist      : %s", ",".join(config.channel_denylist))
-    if config.since or config.until:
-        logger.info("  range         : since=%s until=%s", config.since or "-", config.until or "now")
+    """Print this run's effective configuration as one compact section.
+
+    Never prints the token value or any collected data.
+    """
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    if dry_run:
+        mode = "DRY RUN (estimate only)"
+    elif config.since or config.until:
+        mode = f"date range {config.since or '...'}..{config.until or 'now'}"
     elif config.use_watermark:
-        logger.info("  range         : incremental (watermark); first-run lookback %dd", config.lookback_days)
+        mode = f"incremental (first-run lookback {config.lookback_days}d)"
     else:
-        logger.info("  range         : lookback %dd (watermark off)", config.lookback_days)
-    logger.info("  download files: %s", "yes" if config.download_files else "no")
-    logger.info("  store raw     : %s", "yes" if config.store_raw else "no")
-    logger.info("  concurrency   : %d ch / %d file | page_size %d | api %.1f/s",
+        mode = f"full re-fetch (lookback {config.lookback_days}d)"
+
+    if config.channel_allowlist:
+        scope = "allow: " + ",".join(config.channel_allowlist)
+    elif config.channel_denylist:
+        scope = "deny: " + ",".join(config.channel_denylist)
+    else:
+        scope = "all channels"
+
+    dest = config.output_dir if config.output_mode == "ndjson" else "(postgres)"
+    flags = f"raw={'on' if config.store_raw else 'off'} files={'on' if config.download_files else 'off'}"
+    if config.pseudonymize:
+        flags += " pseudonymize=on"
+
+    line = "=" * 56
+    logger.info(line)
+    logger.info("  SlackCrawler  |  this run")
+    logger.info("-" * 56)
+    logger.info("  Run     : %s | %s", now, mode)
+    logger.info("  Source  : %s | %s", config.channel_types, scope)
+    logger.info("  Output  : %s -> %s | %s", config.output_mode, dest, flags)
+    logger.info("  Engine  : %d ch / %d file workers | page %d | %.1f req/s",
                 config.max_workers, config.file_workers, config.page_size, config.api_rate_per_sec)
-    logger.info("=" * 52)
+    logger.info("  Auth    : %s", _token_kind(config.slack_token))
+    logger.info(line)
 
 
 def run(config: Config, dry_run: bool = False) -> None:
